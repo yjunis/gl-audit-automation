@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# 환경변수 및 비밀정보
+.env
+.env.*
+*.key
+*.pem
+
+# 실데이터 마커 목록(클라이언트명 등) — 커밋 금지
+src/.data_markers
+
+# Streamlit 비밀정보
+.streamlit/secrets.toml
+
+# 생성 결과물
+output/
+reports/
+
+# 실제 감사 데이터
+data/
+
+# 임시 파일
+*.tmp
+*.log
+~$*
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Node.js
+web/node_modules/
+web/.next/
+node_modules/
+.next/

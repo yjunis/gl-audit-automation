@@ -1,0 +1,15 @@
+# FR-01 (현재 단계) 필수
+faker
+numpy
+pandas
+
+# 이후 단계용 (FR-02~FR-08) — 해당 단계에서 설치
+# pandera            # FR-02 데이터 무결성 검증
+# statsmodels        # FR-03 기대치(회귀·STL)
+# statsforecast      # FR-03 시계열 예측구간
+# scipy              # FR-04 z-score·카이제곱
+# pyod               # FR-05 Isolation Forest
+# benford_py         # FR-05 벤포드 법칙
+# xlsxwriter         # FR-07 엑셀 조서
+# python-docx        # FR-07 워드 조서
+# streamlit plotly   # FR-08 대시보드

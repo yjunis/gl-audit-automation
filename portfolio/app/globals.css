@@ -1,0 +1,202 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── 테마 토큰 ─────────────────────────────────────────
+   색은 전부 CSS 변수(공백구분 RGB 채널)로 두고, Tailwind가 rgb(var(--x)/투명도)로 참조한다.
+   디자인은 단일 테마(PwC: 오렌지 + 세리프 제목)로 고정한다.
+   무채색(ink/muted/line/surface)과 상태색(danger/warning/success)은 강조색과 분리돼 있다. */
+:root {
+  color-scheme: light;
+
+  /* 공통 무채색 */
+  --black: 26 26 36;
+  --ink: 46 46 56;
+  --brand-deep: 116 116 128;
+  --muted: 116 116 128;
+  --line: 196 196 205;
+  --line-soft: 231 231 236;
+  --surface: 246 246 250;
+
+  /* 공통 상태색 */
+  --danger: 196 35 26;
+  --warning: 184 92 0;
+  --success: 22 135 54;
+
+  /* ── 디자인 토큰(PwC: 오렌지 + 세리프 제목 + 산세리프 본문) ──
+     --brand      : 주 강조색(버튼·마커·표 강조·차트 띠). 위 글자색은 --on-accent.
+     --rail       : 포인트 레일색(히어로 좌측바·탭 밑줄·로고칩 등 글자 없는 얇은 면).
+     --surface-inverse : 다크 섹션(히어로·표지·푸터) 배경색.
+     --font-sans  : 본문 폰트 / --font-display : 제목 폰트. */
+  --brand: 208 74 2; /* #D04A02 오렌지 */
+  --on-accent: 255 255 255;
+  --rail: 208 74 2;
+  --surface-inverse: 77 77 77; /* #4D4D4D 그레이-다크 배너 톤 */
+  --font-sans: "Inter", "Pretendard", "Malgun Gothic", -apple-system, "Noto Sans KR", sans-serif;
+  --font-display: "Georgia", "Nanum Myeongjo", "Batang", serif;
+
+  --focus-ring: #2e2e38;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* 모든 인터랙티브 요소에 보이는 포커스 링(제거 금지 규칙) */
+a:focus-visible,
+button:focus-visible,
+select:focus-visible,
+input:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* 모션은 짧게, reduced-motion 존중 */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  * {
+    transition-duration: 0.001ms !important;
+    animation-duration: 0.001ms !important;
+  }
+}
+
+@layer components {
+  .container-page {
+    @apply mx-auto w-full max-w-content px-5 md:px-10;
+  }
+
+  /* 카드 — 라운드 0, 그림자 없음, 1px 구분선. 위계는 여백과 선으로만. */
+  .card {
+    @apply border border-line bg-white p-6 md:p-8;
+  }
+
+  /* 라벨(eyebrow) — 옐로우 알약이 아니라 무채색 대문자 라벨 */
+  .tag {
+    @apply inline-block text-label font-semibold uppercase text-muted;
+  }
+
+  .sec-title {
+    @apply font-display text-h3 font-bold text-ink;
+  }
+
+  /* 버튼 — Primary는 강조색 면 + 강조색 위 글자색(테마별로 어둡게/희게 자동) */
+  .btn-primary {
+    @apply inline-flex items-center gap-2 bg-brand px-7 py-3.5 text-sm font-semibold text-on-accent transition-colors hover:brightness-95;
+  }
+  /* Secondary — 투명 배경 + 1px 강한 테두리 */
+  .btn-ghost {
+    @apply inline-flex items-center gap-2 border border-ink bg-transparent px-7 py-3.5 text-sm font-semibold text-ink transition-colors hover:bg-surface;
+  }
+
+  /* ── 대시보드 히어로 — 다크 면(그라디언트·그림자·라운드 없음), 좌측 4px 옐로우 바 1개 ── */
+  .hero {
+    @apply mb-6 border-l-4 border-rail bg-inverse px-6 py-6 text-white md:px-8;
+  }
+  /* 히어로 eyebrow — 강조색을 다크 배경 위 글자로 쓰면 테마에 따라 대비가 무너지므로
+     밝은 무채색으로 둔다(강조색은 좌측 바·버튼·마커에서만 면으로 노출). */
+  .hero-eyebrow {
+    @apply text-label font-semibold uppercase text-line-soft;
+  }
+  .hero-title {
+    @apply mt-2 font-display text-h3 font-bold text-white;
+  }
+  .hero-sub {
+    @apply mt-2 text-sm text-line-soft;
+  }
+
+  /* KPI(Stat 블록) — 옐로우 상단바 제거, 무채색 카드. 숫자가 크게 이긴다. */
+  .kpi-row {
+    @apply mb-6 grid grid-cols-2 gap-4 md:grid-cols-4;
+  }
+  .kpi {
+    @apply border border-line bg-white px-5 py-5;
+  }
+  .kpi-label {
+    @apply text-label font-semibold uppercase text-muted;
+  }
+  .kpi-val {
+    @apply mt-2 text-3xl font-bold leading-none text-ink;
+  }
+  .kpi-sub {
+    @apply mt-2 text-xs text-muted;
+  }
+
+  /* 3초 요약 — 좌측 색바가 위험도, 문장 하나로 끝낸다(라운드 없음) */
+  .glance {
+    @apply mb-6 border border-line bg-surface px-5 py-3 text-base text-ink;
+    border-left-width: 4px;
+  }
+
+  /* 캡션 — 설명은 짧게 */
+  .cap {
+    @apply text-xs leading-relaxed text-muted;
+  }
+}
+
+/* ── 인쇄(PDF 저장) — /report 페이지를 보고서로 출력 ── */
+@media print {
+  /* 보고서(/report) 페이지에서만 사이트 네비·푸터를 숨긴다(표지를 깔끔히).
+     대시보드 캡처 PDF는 실제 화면처럼 네비·푸터를 그대로 남긴다.
+     보고서 표지도 <header>라서, .report가 있는 문서의 body 직속 header/footer만 콕 집는다. */
+  body:has(.report) > header,
+  body:has(.report) > footer,
+  .no-print {
+    display: none !important;
+  }
+
+  /* 대시보드 캡처(?capture=1) — 가로 A4, 데스크톱 폭 유지. page 속성은 상속되므로
+     html에 걸면 네비·히어로·패널·푸터까지 문서 전체가 가로 페이지가 된다. */
+  @page landscapePage {
+    size: A4 landscape;
+    margin: 10mm;
+  }
+  html.cap-landscape {
+    page: landscapePage;
+  }
+
+  /* 배경색·강조색을 인쇄에도 그대로(다크 표지, 옐로우 마커 등) */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  html,
+  body {
+    background: #fff !important;
+  }
+
+  /* 보고서(/report)는 '화면 그대로' 저장한다.
+     인쇄 페이지 폭을 화면 컨테이너 폭(max-w-content=1280px)과 똑같이 맞춰,
+     A4(약 794px)로 좁아지며 글자가 커지고 배열이 깨지던 문제를 없앤다.
+     .report는 container-page(max-w-content·좌우 여백)를 그대로 유지한다(A4용 폭 초기화 제거). */
+  .report {
+    /* 인쇄에서는 컨테이너 좌우 안쪽 여백을 없애고, 페이지 여백(@page)만으로 둘레 여백을
+       단일하게 제어한다(안쪽+바깥쪽이 겹쳐 여백이 과해 보이던 문제 제거). */
+    margin-left: auto !important;
+    margin-right: auto !important;
+    padding-left: 0 !important;
+    padding-right: 0 !important;
+  }
+  @page {
+    /* 상하좌우 여백 40px(가장자리~내용까지 실제 여백). 가용폭 1120 − 80 = 1040px. */
+    size: 1120px 1584px;
+    margin: 40px;
+  }
+
+  /* 표 머리행은 페이지마다 반복, 행은 중간에 잘리지 않게 */
+  thead {
+    display: table-header-group;
+  }
+  tr,
+  article {
+    break-inside: avoid;
+  }
+}
