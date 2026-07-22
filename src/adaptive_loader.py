@@ -89,8 +89,20 @@ def build_colmap(cols):
     return cm
 
 
+# Excel serial date(1899-12-30 기준 일수)로 인정할 범위 — 1990-01-01 ~ 2079-12-31.
+# 이 범위를 벗어난 숫자(금액 등)는 날짜로 보지 않는다.
+_SERIAL_MIN, _SERIAL_MAX = 32874, 65746
+
+
 def parse_dates(s, year):
     out = pd.to_datetime(s, errors="coerce")
+    # 숫자로 들어온 Excel serial date 보정.
+    # pd.to_datetime은 숫자를 '1970 기준 나노초'로 해석해 전부 1970-01-01이 되므로,
+    # 합리적 범위의 순수 숫자만 골라 Excel 기준일(1899-12-30)로 다시 계산한다.
+    nums = pd.to_numeric(s, errors="coerce")
+    serial = nums.notna() & nums.between(_SERIAL_MIN, _SERIAL_MAX)
+    if serial.any():
+        out.loc[serial] = pd.to_datetime(nums[serial], unit="D", origin="1899-12-30")
     strs = s.astype(str).str.strip()
     md = strs.str.match(r"^\d{1,2}[-/.]\d{1,2}$")     # 연도 없는 MM-DD
     if md.any():
@@ -164,10 +176,18 @@ def _std_from_sheet(sheet, raw, hr, cm, year, use_acct_cols):
     def _col(key):
         j = cm.get(key)
         return tx.iloc[:, j] if j is not None else None
+    def _text(col):
+        """문자열로 정리하되 결측·공백은 NaN으로 유지한다.
+           astype(str)만 쓰면 결측이 'nan' 문자열이 되어, 뒤의 notna() 기반
+           '메타필드 존재' 판정과 fraud score의 만점(MAXPOSS)이 왜곡된다."""
+        v = col.astype(str).str.strip()
+        blank = col.isna() | (v == "") | v.str.lower().isin(["nan", "none", "nat"])
+        return v.mask(blank, np.nan)
+
     a, ind, jt = _col("author"), _col("inputdate"), _col("jtype")
-    std["작성자"] = a.astype(str).str.strip().values if a is not None else np.nan
+    std["작성자"] = _text(a).values if a is not None else np.nan
     std["입력일"] = parse_dates(ind, year).values if ind is not None else pd.NaT
-    std["전표유형"] = jt.astype(str).str.strip().values if jt is not None else np.nan
+    std["전표유형"] = _text(jt).values if jt is not None else np.nan
 
     # 기초(이월) — 시트별형에서만 의미
     openD = openC = 0.0
@@ -221,9 +241,20 @@ def load_ledger(path):
                 flats.append((len(data), p))
     frames, tb_rows = [], []
     if flats:
-        _, p = max(flats, key=lambda x: x[0])
-        std, _ = _std_from_sheet(p["sheet"], p["raw"], p["hr"], p["cm"], year, use_acct_cols=True)
-        frames.append(std)
+        # 같은 구조(헤더 구성이 동일)의 시트끼리 묶는다. 원장이 여러 시트로 나뉜 경우를
+        # 모두 적재하되, 구조가 다른 시트(요약·피벗 등)가 섞여 중복 집계되는 것은 막는다.
+        groups = {}
+        for size, p in flats:
+            hdr = [norm(v) for v in p["raw"].iloc[p["hr"]].tolist()]
+            sig = tuple(h for h in hdr if h and h.lower() != "nan")
+            groups.setdefault(sig, []).append((size, p))
+        # 총 행수가 가장 많은 구조를 본문 원장으로 채택(단일 시트면 기존 동작과 동일)
+        best_sig = max(groups, key=lambda k: sum(s for s, _ in groups[k]))
+        for _, p in groups[best_sig]:
+            std, _ = _std_from_sheet(p["sheet"], p["raw"], p["hr"], p["cm"], year,
+                                     use_acct_cols=True)
+            if std is not None and not std.empty:
+                frames.append(std)
         layout = "단일표형"
     else:
         layout = "시트별형"
@@ -246,9 +277,10 @@ def load_ledger(path):
     gl = pd.concat(frames, ignore_index=True)
     gl["계정코드"] = gl["계정코드"].astype(str).str.strip()
     # 계정코드가 없거나 비숫자(계정명을 코드로 쓴 경우) → 계정명 기준 합성 숫자코드 부여
+    code_map = None
     if not gl["계정코드"].str.match(r"^\d+$").all():
-        uniq = {n: f"9{i + 1:05d}" for i, n in enumerate(gl["계정명"].astype(str).unique())}
-        gl["계정코드"] = gl["계정명"].astype(str).map(uniq)
+        code_map = {n: f"9{i + 1:05d}" for i, n in enumerate(gl["계정명"].astype(str).unique())}
+        gl["계정코드"] = gl["계정명"].astype(str).map(code_map)
     gl["전표일자"] = pd.to_datetime(gl["전표일자"])
     gl = gl.dropna(subset=["전표일자"]).sort_values("전표일자").reset_index(drop=True)
     gl["전표월"] = gl["전표일자"].dt.to_period("M").astype(str)
@@ -260,6 +292,12 @@ def load_ledger(path):
         tb["시스템누계차변"] = np.nan; tb["시스템누계대변"] = np.nan
     else:
         tb = pd.DataFrame(tb_rows)
+        # GL에 합성 계정코드를 부여했다면 TB에도 '계정명 기준'으로 똑같이 적용한다.
+        # (적용하지 않으면 TB는 원래 코드(계정명)를 들고 있어
+        #  fr02_validate.py의 tb.merge(det, on="계정코드") 역산 대사가 통째로 실패한다.)
+        if code_map is not None and not tb.empty:
+            tb["계정코드"] = (tb["계정명"].astype(str).map(code_map)
+                            .fillna(tb["계정코드"].astype(str)))
         tb["시스템누계차변"] = np.nan; tb["시스템누계대변"] = np.nan
 
     company = _company_name(path, parsed)

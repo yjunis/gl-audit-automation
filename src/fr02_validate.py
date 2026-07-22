@@ -34,7 +34,27 @@ def record(level, name, ok, n, desc):
 
 
 # ========== 1) Pandera 스키마 검사 (열 단위 규칙) ==========
-dmin, dmax = pd.Timestamp("2025-01-01"), pd.Timestamp("2025-12-31")
+# 날짜 검증 범위는 특정 연도로 고정하지 않는다(고정하면 다른 연도의 정상 원장이 전부 실패).
+#  1) GL_FY_START·GL_FY_END 를 주면 그대로 사용 → 달력연도와 다른 회계연도(예: 4월~익년 3월) 지원
+#  2) 없으면 원장의 '현실적인' 전표일자에서 회계기간을 추론한다.
+#     현실 범위 밖(1970 등 serial 오해석·오타)은 추론에서 제외하므로, 그 값들은 범위 위반으로 걸린다.
+SANE_MIN = pd.Timestamp("1990-01-01")
+SANE_MAX = pd.Timestamp.today().normalize() + pd.DateOffset(years=1)
+
+
+def _fiscal_range(dates):
+    env_s, env_e = os.environ.get("GL_FY_START"), os.environ.get("GL_FY_END")
+    if env_s and env_e:
+        return pd.Timestamp(env_s), pd.Timestamp(env_e)
+    d = pd.to_datetime(dates, errors="coerce").dropna()
+    sane = d[(d >= SANE_MIN) & (d <= SANE_MAX)]
+    if sane.empty:                      # 전부 비현실적 → 현실 범위로 검사(전건 위반으로 드러남)
+        return SANE_MIN, SANE_MAX
+    return (pd.Timestamp(year=int(sane.min().year), month=1, day=1),
+            pd.Timestamp(year=int(sane.max().year), month=12, day=31))
+
+
+dmin, dmax = _fiscal_range(gl["전표일자"])
 schema = DataFrameSchema(
     {
         "계정코드": Column(str, Check.str_matches(r"^\d{3,12}$"), nullable=False),  # 3자리 표준코드(108·504 등)~회사별 다자리
