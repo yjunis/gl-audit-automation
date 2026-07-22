@@ -40,3 +40,6 @@ web/node_modules/
 web/.next/
 node_modules/
 .next/
+# 빌드 산출물(재생성 가능)
+portfolio/dist/
+portfolio/out/
