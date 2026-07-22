@@ -34,85 +34,91 @@ def record(level, name, ok, n, desc):
                         건수=n, 설명=desc))
 
 
-# ========== 1) 회계기간 판정 → Pandera 스키마 검사 ==========
-# 날짜 허용 범위를 '검증 대상 날짜의 min/max'로 만들면 안 된다.
-#   (오입력 1건이 스스로 범위를 넓혀 자기 자신을 통과시키는 자기참조 결함)
-# 그래서 원장 날짜와 독립적인 근거를 우선순위대로 쓰고,
-# 신뢰성 있게 정할 수 없으면 자동 통과시키지 않고 '보류'로 남긴다.
-#   ① GL_FY_START·GL_FY_END (명시 지정 — 비달력 회계연도 지원)
-#   ② 로더가 파일명 등으로 독립 추론한 메타데이터(data/ledger_meta.json)
-#   ③ GL_FY_YEAR 설정값
-#   ④ 지배적 거래기간(거래가 가장 몰린 12개월 창) — min/max가 아니라 '집중도'로 정한다
-SANE_MIN = pd.Timestamp("1990-01-01")
-SANE_MAX = pd.Timestamp.today().normalize() + pd.DateOffset(years=1)
-DOMINANCE = 0.98        # 12개월 창이 이 비율 이상을 담아야 '지배적'으로 인정
+# ========== 1) 회계기간 확정 → Pandera 스키마 검사 ==========
+# [설계 원칙] 회계기간은 '검증 대상인 거래일'과 독립된 근거에서만 받는다.
+#   거래일로 기간을 추론해 그 거래일을 검증하면 데이터가 스스로를 정당화하는
+#   자기참조가 되어(예: 원장 전체가 1년 밀려도 100% 일치로 통과) 어떤 임계값을
+#   덧붙여도 막을 수 없다. 그래서 추론은 '제안값'으로만 쓰고 기준으로는 쓰지 않는다.
+#
+#   근거 우선순위: 환경변수 → 설정 파일 → 파일 메타데이터
+#     ① GL_FY_START·GL_FY_END   (사용자 지정, 비달력 회계연도)
+#     ② GL_FY_YEAR              (사용자 지정, 달력연도)
+#     ③ <BASE>/fiscal_period.json           (설정 파일)
+#     ④ <BASE>/data/ledger_meta.json        (로더가 파일명에서 추출한 메타데이터)
+#   하나도 없으면 자동 통과시키지 않고 analysis hold(분석 보류)로 처리한다.
 
 
-def _load_ledger_meta(base):
-    p = Path(base) / "data" / "ledger_meta.json"
-    if not p.exists():
-        return {}
+def _year_range(y, src):
+    y = int(y)
+    return pd.Timestamp(y, 1, 1), pd.Timestamp(y, 12, 31), src
+
+
+def _period_from_env():
+    s, e = os.environ.get("GL_FY_START"), os.environ.get("GL_FY_END")
+    if s and e:
+        return pd.Timestamp(s), pd.Timestamp(e), "환경변수 GL_FY_START/END"
+    y = os.environ.get("GL_FY_YEAR")
+    if y and str(y).strip().isdigit():
+        return _year_range(y, f"환경변수 GL_FY_YEAR({int(y)})")
+    return None
+
+
+def _period_from_json(path, label):
+    if not path.exists():
+        return None
     try:
-        return json.loads(p.read_text(encoding="utf-8"))
+        m = json.loads(path.read_text(encoding="utf-8"))
     except Exception:
-        return {}
+        return None
+    if m.get("fy_start") and m.get("fy_end"):
+        return pd.Timestamp(m["fy_start"]), pd.Timestamp(m["fy_end"]), f"{label}(회계기간)"
+    if m.get("fy_year"):
+        return _year_range(m["fy_year"], f"{label} 회계연도({int(m['fy_year'])})")
+    return None
 
 
-def _dominant_period(d):
-    """거래가 가장 몰린 12개월 창 → (시작, 종료, 집중도).
-       min/max를 쓰지 않으므로 소수의 오입력이 기간을 넓히지 못한다."""
+def resolve_fiscal_period(base):
+    """독립 근거에서만 회계기간을 확정한다. 거래일 데이터는 참조하지 않는다."""
+    base = Path(base)
+    for src in (lambda: _period_from_env(),
+                lambda: _period_from_json(base / "fiscal_period.json", "설정 파일"),
+                lambda: _period_from_json(base / "data" / "ledger_meta.json", "로더 메타데이터")):
+        got = src()
+        if got and got[0] <= got[1]:
+            return got
+    return None
+
+
+def suggest_fiscal_period(dates):
+    """거래일 분포로 추정한 '제안값'. 검증 기준이 아니라 사용자 안내용이다.
+       거래가 가장 몰린 12개월 창을 돌려준다."""
+    d = pd.to_datetime(dates, errors="coerce").dropna()
+    if d.empty:
+        return None
     counts = d.dt.to_period("M").value_counts().sort_index()
     best = None
     for st in counts.index:
         win = counts[(counts.index >= st) & (counts.index < st + 12)]
-        # 동점이면 시작월 거래건수가 많은 창을 택한다(1건짜리 오입력 월이 시작점이 되지 않도록)
         key = (int(win.sum()), int(counts[st]))
         if best is None or key > best[0]:
             best = (key, st)
     (total, _), st = best
-    end = (st + 12).to_timestamp() - pd.Timedelta(days=1)
-    return st.to_timestamp(), end, total / len(d)
+    return st.to_timestamp(), (st + 12).to_timestamp() - pd.Timedelta(days=1), total / len(d)
 
 
-def _fiscal_period(dates, base):
-    """(시작, 종료, 근거). 신뢰성 있게 못 정하면 (None, None, 사유)."""
-    s, e = os.environ.get("GL_FY_START"), os.environ.get("GL_FY_END")
-    if s and e:
-        return pd.Timestamp(s), pd.Timestamp(e), "GL_FY_START/END 지정"
-
-    m = _load_ledger_meta(base)
-    if m.get("fy_start") and m.get("fy_end"):
-        return pd.Timestamp(m["fy_start"]), pd.Timestamp(m["fy_end"]), "로더 메타데이터(회계기간)"
-    if m.get("fy_year"):
-        y = int(m["fy_year"])
-        return pd.Timestamp(y, 1, 1), pd.Timestamp(y, 12, 31), f"로더 메타데이터 회계연도({y})"
-
-    y = os.environ.get("GL_FY_YEAR")
-    if y and str(y).strip().isdigit():
-        y = int(y)
-        return pd.Timestamp(y, 1, 1), pd.Timestamp(y, 12, 31), f"GL_FY_YEAR 설정({y})"
-
-    d = pd.to_datetime(dates, errors="coerce").dropna()
-    if d.empty:
-        return None, None, "유효한 전표일자가 없어 회계기간을 정할 수 없음"
-    start, end, cover = _dominant_period(d)
-    if cover < DOMINANCE:
-        return None, None, (f"지배적 12개월 기간을 찾지 못함(최대 집중도 {cover:.1%} "
-                            f"< {DOMINANCE:.0%}) — 전기 비교자료 혼입 등")
-    if start < SANE_MIN or end > SANE_MAX:
-        return None, None, (f"추정 회계기간({start:%Y-%m-%d}~{end:%Y-%m-%d})이 비현실적 "
-                            "— 날짜 형식 오류 가능")
-    return start, end, f"지배적 거래기간 추정({cover:.1%} 집중)"
-
-
-dmin, dmax, fy_src = _fiscal_period(gl["전표일자"], BASE)
-if dmin is not None:
-    record("WARNING", "회계기간 판정", True, 0,
+period = resolve_fiscal_period(BASE)
+if period is not None:
+    dmin, dmax, fy_src = period
+    record("ERROR", "회계기간 확정", True, 0,
            f"{dmin:%Y-%m-%d}~{dmax:%Y-%m-%d} · 근거: {fy_src}")
     date_checks = [Check.in_range(dmin, dmax)]
 else:
-    record("WARNING", "회계기간 판정", False, 0,
-           f"{fy_src} → 날짜 범위 검증 보류(GL_FY_START/END로 지정 필요)")
+    sug = suggest_fiscal_period(gl["전표일자"])
+    hint = (f" 참고(거래 분포 제안값): {sug[0]:%Y-%m-%d}~{sug[1]:%Y-%m-%d} ({sug[2]:.0%} 집중)"
+            if sug else "")
+    record("ERROR", "회계기간 확정", False, 0,
+           "독립 근거 없음(GL_FY_START/END·GL_FY_YEAR·fiscal_period.json·ledger_meta.json) "
+           f"→ 날짜 범위 검증 보류(analysis hold).{hint}")
     date_checks = []
 
 schema = DataFrameSchema(
