@@ -41,11 +41,13 @@ const config: Config = {
       fontSize: {
         // 타입 스케일 — 큰 위계에만 골라 적용
         label: ["0.75rem", { lineHeight: "1.2", letterSpacing: "0.08em" }],
-        lead: ["1.375rem", { lineHeight: "1.6" }],
-        h4: ["1.25rem", { lineHeight: "1.4", letterSpacing: "0" }],
-        h3: ["1.75rem", { lineHeight: "1.3", letterSpacing: "-0.01em" }],
-        h2: ["2.5rem", { lineHeight: "1.2", letterSpacing: "-0.015em" }],
-        display: ["clamp(2.5rem, 5vw, 4rem)", { lineHeight: "1.1", letterSpacing: "-0.02em" }],
+        // 한글은 라틴보다 글자 밀도가 높아, 큰 제목일수록 행간을 넉넉히 주고
+        // 음수 자간은 얕게 잡아야 답답해 보이지 않는다.
+        lead: ["1.1875rem", { lineHeight: "1.75" }],
+        h4: ["1.25rem", { lineHeight: "1.45", letterSpacing: "0" }],
+        h3: ["1.625rem", { lineHeight: "1.4", letterSpacing: "-0.005em" }],
+        h2: ["2.25rem", { lineHeight: "1.3", letterSpacing: "-0.01em" }],
+        display: ["clamp(1.875rem, 4vw, 3rem)", { lineHeight: "1.32", letterSpacing: "-0.015em" }],
         stat: ["clamp(3rem, 6vw, 5rem)", { lineHeight: "1.0", letterSpacing: "-0.03em" }],
       },
       fontWeight: {

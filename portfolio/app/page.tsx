@@ -65,12 +65,12 @@ export default function HomePage() {
       <section className="border-b border-line bg-surface">
         <div className="container-page py-16 md:py-24">
           <span className="tag">회계감사 · 데이터분석 포트폴리오</span>
-          <h1 className="mt-5 max-w-4xl font-display text-display font-bold text-ink">
-            총계정원장 전수를 훑어,
-            <br />
-            감사인이 볼 곳만 남깁니다
+          {/* 강제 줄바꿈(<br/>) 대신 text-balance로 화면 폭에 맞춰 줄이 고르게 나뉘게 한다.
+              좁은 화면에서 어색하게 3줄로 쪼개지던 문제도 함께 사라진다. */}
+          <h1 className="mt-5 max-w-3xl text-balance font-display text-display font-bold text-ink">
+            총계정원장 전수를 훑어, 감사인이 볼 곳만 남깁니다
           </h1>
-          <p className="mt-6 max-w-prose text-lead font-normal text-ink">
+          <p className="mt-6 max-w-prose text-pretty text-lead font-normal text-ink-soft">
             감사기준서 520의 분석적 절차와 240의 전표기입 검사 <b>개념을 참고해</b>, 원장{" "}
             {summary.journal_count.toLocaleString("ko-KR")}건을 전수 계산하고{" "}
             <b>이상 후보 계정 {summary.high_risk_accounts}개</b>와{" "}

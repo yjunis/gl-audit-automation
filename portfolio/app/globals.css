@@ -33,7 +33,11 @@
   --rail: 208 74 2;
   --surface-inverse: 77 77 77; /* #4D4D4D 그레이-다크 배너 톤 */
   --font-sans: "Inter", "Pretendard", "Malgun Gothic", -apple-system, "Noto Sans KR", sans-serif;
-  --font-display: "Georgia", "Nanum Myeongjo", "Batang", serif;
+  /* 제목 폰트: 세리프(Georgia)는 한글 글리프가 없어 '바탕'으로 떨어지는데,
+     바탕은 진짜 볼드가 없어 굵은 대형 제목이 합성 볼드로 뭉개진다.
+     한글 볼드가 정상인 산세리프로 통일하고, 위계는 크기·굵기·자간으로 만든다.
+     브랜드 인상은 강조색(--brand)이 담당한다. */
+  --font-display: "Pretendard", "Malgun Gothic", -apple-system, "Noto Sans KR", sans-serif;
 
   --focus-ring: #2e2e38;
 }
@@ -45,6 +49,11 @@ html {
 body {
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  /* 한글은 기본값(break-all 유사)이면 '감사인이' → '감 / 사인이' 처럼 낱글자로 쪼개진다.
+     keep-all 로 어절(띄어쓰기) 단위에서만 줄을 바꾸고,
+     URL·긴 영문처럼 한 덩어리가 폭을 넘길 때만 예외적으로 끊어 넘침을 막는다. */
+  word-break: keep-all;
+  overflow-wrap: break-word;
 }
 
 /* 모든 인터랙티브 요소에 보이는 포커스 링(제거 금지 규칙) */
