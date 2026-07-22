@@ -27,14 +27,23 @@ def norm(x):
     return re.sub(r"\s+", "", str(x))
 
 
-def infer_year(name):
+def infer_year_strict(name):
+    """파일명에서 회계연도를 찾으면 int, 못 찾으면 None.
+       FR-02의 회계기간 판정은 '실제로 찾은 경우'에만 이 값을 근거로 써야 하므로,
+       기본값으로 얼버무리지 않고 None을 돌려준다."""
     m = re.search(r"(20\d\d)", name)
     if m:
         return int(m.group(1))
     m = re.search(r"(\d\d)\s*년", name)
     if m:
         return 2000 + int(m.group(1))
-    return 2025
+    return None
+
+
+def infer_year(name):
+    """MM-DD 날짜 보완용 — 못 찾으면 기본값으로 진행한다."""
+    y = infer_year_strict(name)
+    return y if y is not None else 2025
 
 
 def find_header_row(raw):
@@ -307,7 +316,10 @@ def load_ledger(path):
     meta_present = [c for c in ["작성자", "입력일", "전표유형"]
                     if c in gl.columns and gl[c].notna().any()]
     out_cols += meta_present
+    # fy_year: 파일명에서 '실제로' 찾은 회계연도만 담는다(없으면 None).
+    # FR-02가 이 값을 회계기간 판정 근거로 쓰므로, 기본값을 넣으면 잘못된 기간을 강제하게 된다.
     meta = dict(company=company, layout=layout, year=year,
+                fy_year=infer_year_strict(path.name),
                 n_accounts=gl["계정코드"].nunique(), n_rows=len(gl),
                 debit=float(gl["차변"].sum()), credit=float(gl["대변"].sum()),
                 meta_fields=meta_present)

@@ -80,6 +80,10 @@ def standardize(xlsx):
     (base / "reports").mkdir(exist_ok=True)
     r["gl"].to_csv(base / "data" / "gl_clean.csv", index=False, encoding="utf-8-sig")
     r["tb"].to_csv(base / "data" / "trial_balance.csv", index=False, encoding="utf-8-sig")
+    # FR-02 회계기간 판정 근거(원장 날짜와 독립) — 파일명에서 찾은 연도만 담긴다.
+    (base / "data" / "ledger_meta.json").write_text(
+        json.dumps({k: meta[k] for k in ("company", "layout", "fy_year")},
+                   ensure_ascii=False), encoding="utf-8")
     yr = int(pd.to_datetime(r["gl"]["전표일자"]).dt.year.max())
     del r
     gc.collect()

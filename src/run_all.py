@@ -19,6 +19,7 @@ import os
 import re
 import sys
 import glob
+import json
 import shutil
 import subprocess
 from pathlib import Path
@@ -111,6 +112,10 @@ def main():
         (cdir / "reports").mkdir(parents=True, exist_ok=True)
         r["gl"].to_csv(cdir / "data" / "gl_clean.csv", index=False, encoding="utf-8-sig")
         r["tb"].to_csv(cdir / "data" / "trial_balance.csv", index=False, encoding="utf-8-sig")
+        # FR-02 회계기간 판정 근거(원장 날짜와 독립) — 파일명에서 찾은 연도만 담긴다.
+        (cdir / "data" / "ledger_meta.json").write_text(
+            json.dumps({k: m[k] for k in ("company", "layout", "fy_year")},
+                       ensure_ascii=False), encoding="utf-8")
 
         grade, ratio = balance_grade(m["debit"], m["credit"])
         print(f"  회사={m['company']} | {m['layout']} | 계정 {m['n_accounts']} | "

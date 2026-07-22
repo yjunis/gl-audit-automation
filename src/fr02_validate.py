@@ -12,6 +12,7 @@ FR-02 · 데이터 무결성 검증 (감사기준서 520.5(b) 대응)
 출력 : 콘솔 요약 + reports/fr02_검증결과.md
 """
 
+import json
 import os
 import pandas as pd
 import pandera.pandas as pa
@@ -33,34 +34,92 @@ def record(level, name, ok, n, desc):
                         건수=n, 설명=desc))
 
 
-# ========== 1) Pandera 스키마 검사 (열 단위 규칙) ==========
-# 날짜 검증 범위는 특정 연도로 고정하지 않는다(고정하면 다른 연도의 정상 원장이 전부 실패).
-#  1) GL_FY_START·GL_FY_END 를 주면 그대로 사용 → 달력연도와 다른 회계연도(예: 4월~익년 3월) 지원
-#  2) 없으면 원장의 '현실적인' 전표일자에서 회계기간을 추론한다.
-#     현실 범위 밖(1970 등 serial 오해석·오타)은 추론에서 제외하므로, 그 값들은 범위 위반으로 걸린다.
+# ========== 1) 회계기간 판정 → Pandera 스키마 검사 ==========
+# 날짜 허용 범위를 '검증 대상 날짜의 min/max'로 만들면 안 된다.
+#   (오입력 1건이 스스로 범위를 넓혀 자기 자신을 통과시키는 자기참조 결함)
+# 그래서 원장 날짜와 독립적인 근거를 우선순위대로 쓰고,
+# 신뢰성 있게 정할 수 없으면 자동 통과시키지 않고 '보류'로 남긴다.
+#   ① GL_FY_START·GL_FY_END (명시 지정 — 비달력 회계연도 지원)
+#   ② 로더가 파일명 등으로 독립 추론한 메타데이터(data/ledger_meta.json)
+#   ③ GL_FY_YEAR 설정값
+#   ④ 지배적 거래기간(거래가 가장 몰린 12개월 창) — min/max가 아니라 '집중도'로 정한다
 SANE_MIN = pd.Timestamp("1990-01-01")
 SANE_MAX = pd.Timestamp.today().normalize() + pd.DateOffset(years=1)
+DOMINANCE = 0.98        # 12개월 창이 이 비율 이상을 담아야 '지배적'으로 인정
 
 
-def _fiscal_range(dates):
-    env_s, env_e = os.environ.get("GL_FY_START"), os.environ.get("GL_FY_END")
-    if env_s and env_e:
-        return pd.Timestamp(env_s), pd.Timestamp(env_e)
+def _load_ledger_meta(base):
+    p = Path(base) / "data" / "ledger_meta.json"
+    if not p.exists():
+        return {}
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _dominant_period(d):
+    """거래가 가장 몰린 12개월 창 → (시작, 종료, 집중도).
+       min/max를 쓰지 않으므로 소수의 오입력이 기간을 넓히지 못한다."""
+    counts = d.dt.to_period("M").value_counts().sort_index()
+    best = None
+    for st in counts.index:
+        win = counts[(counts.index >= st) & (counts.index < st + 12)]
+        # 동점이면 시작월 거래건수가 많은 창을 택한다(1건짜리 오입력 월이 시작점이 되지 않도록)
+        key = (int(win.sum()), int(counts[st]))
+        if best is None or key > best[0]:
+            best = (key, st)
+    (total, _), st = best
+    end = (st + 12).to_timestamp() - pd.Timedelta(days=1)
+    return st.to_timestamp(), end, total / len(d)
+
+
+def _fiscal_period(dates, base):
+    """(시작, 종료, 근거). 신뢰성 있게 못 정하면 (None, None, 사유)."""
+    s, e = os.environ.get("GL_FY_START"), os.environ.get("GL_FY_END")
+    if s and e:
+        return pd.Timestamp(s), pd.Timestamp(e), "GL_FY_START/END 지정"
+
+    m = _load_ledger_meta(base)
+    if m.get("fy_start") and m.get("fy_end"):
+        return pd.Timestamp(m["fy_start"]), pd.Timestamp(m["fy_end"]), "로더 메타데이터(회계기간)"
+    if m.get("fy_year"):
+        y = int(m["fy_year"])
+        return pd.Timestamp(y, 1, 1), pd.Timestamp(y, 12, 31), f"로더 메타데이터 회계연도({y})"
+
+    y = os.environ.get("GL_FY_YEAR")
+    if y and str(y).strip().isdigit():
+        y = int(y)
+        return pd.Timestamp(y, 1, 1), pd.Timestamp(y, 12, 31), f"GL_FY_YEAR 설정({y})"
+
     d = pd.to_datetime(dates, errors="coerce").dropna()
-    sane = d[(d >= SANE_MIN) & (d <= SANE_MAX)]
-    if sane.empty:                      # 전부 비현실적 → 현실 범위로 검사(전건 위반으로 드러남)
-        return SANE_MIN, SANE_MAX
-    return (pd.Timestamp(year=int(sane.min().year), month=1, day=1),
-            pd.Timestamp(year=int(sane.max().year), month=12, day=31))
+    if d.empty:
+        return None, None, "유효한 전표일자가 없어 회계기간을 정할 수 없음"
+    start, end, cover = _dominant_period(d)
+    if cover < DOMINANCE:
+        return None, None, (f"지배적 12개월 기간을 찾지 못함(최대 집중도 {cover:.1%} "
+                            f"< {DOMINANCE:.0%}) — 전기 비교자료 혼입 등")
+    if start < SANE_MIN or end > SANE_MAX:
+        return None, None, (f"추정 회계기간({start:%Y-%m-%d}~{end:%Y-%m-%d})이 비현실적 "
+                            "— 날짜 형식 오류 가능")
+    return start, end, f"지배적 거래기간 추정({cover:.1%} 집중)"
 
 
-dmin, dmax = _fiscal_range(gl["전표일자"])
+dmin, dmax, fy_src = _fiscal_period(gl["전표일자"], BASE)
+if dmin is not None:
+    record("WARNING", "회계기간 판정", True, 0,
+           f"{dmin:%Y-%m-%d}~{dmax:%Y-%m-%d} · 근거: {fy_src}")
+    date_checks = [Check.in_range(dmin, dmax)]
+else:
+    record("WARNING", "회계기간 판정", False, 0,
+           f"{fy_src} → 날짜 범위 검증 보류(GL_FY_START/END로 지정 필요)")
+    date_checks = []
+
 schema = DataFrameSchema(
     {
         "계정코드": Column(str, Check.str_matches(r"^\d{3,12}$"), nullable=False),  # 3자리 표준코드(108·504 등)~회사별 다자리
         "계정명":  Column(str, nullable=False),
-        "전표일자": Column("datetime64[ns]",
-                         Check.in_range(dmin, dmax), nullable=False),
+        "전표일자": Column("datetime64[ns]", date_checks, nullable=False),
         "차변":   Column(float, nullable=False),
         "대변":   Column(float, nullable=False),
     },
